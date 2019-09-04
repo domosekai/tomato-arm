@@ -543,6 +543,17 @@ config NETFILTER_XT_TARGET_RATEEST
 
 	  To compile it as a module, choose M here.  If unsure, say N.
 
+config NETFILTER_XT_TARGET_REMOVECT
+	tristate  '"REMOVECT" target support'
+	depends on NF_CONNTRACK
+	depends on NETFILTER_ADVANCED
+	help
+	  The REMOVECT target removes connection tracking from a packet and
+	  reinject it before conntrack so that a new ct could be created.
+
+	  If you want to compile it as a module, say M here and read
+	  <file:Documentation/kbuild/modules.txt>.  If unsure, say `N'.
+
 config NETFILTER_XT_TARGET_TEE
 	tristate '"TEE" - packet cloning to alternate destination'
 	depends on NETFILTER_ADVANCED
