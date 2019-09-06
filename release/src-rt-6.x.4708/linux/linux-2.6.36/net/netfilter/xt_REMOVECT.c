@@ -5,6 +5,7 @@
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_queue.h>
 
+MODULE_AUTHOR("Wanagran <marywangran@126.com>");
 MODULE_DESCRIPTION("Xtables: Removing connection tracking for packets");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("ipt_REMOVECT");
