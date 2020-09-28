@@ -1,4 +1,4 @@
-/* dnsmasq is Copyright (c) 2000-2018 Simon Kelley
+/* dnsmasq is Copyright (c) 2000-2020 Simon Kelley
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -93,10 +93,13 @@ int send_from(int fd, int nowild, char *packet, size_t len,
   
   while (retry_send(sendmsg(fd, &msg, 0)));
 
-  /* If interface is still in DAD, EINVAL results - ignore that. */
-  if (errno != 0 && errno != EINVAL)
+  if (errno != 0)
     {
-      my_syslog(LOG_ERR, _("failed to send packet: %s"), strerror(errno));
+#ifdef HAVE_LINUX_NETWORK
+      /* If interface is still in DAD, EINVAL results - ignore that. */
+      if (errno != EINVAL)
+	my_syslog(LOG_ERR, _("failed to send packet: %s"), strerror(errno));
+#endif
       return 0;
     }
   
@@ -125,7 +128,9 @@ static unsigned int search_servers(time_t now, union all_addr **addrpp, unsigned
       {
 	unsigned int sflag = serv->addr.sa.sa_family == AF_INET ? F_IPV4 : F_IPV6; 
 	*type = SERV_FOR_NODOTS;
-	if (serv->flags & SERV_NO_ADDR)
+	if ((serv->flags & SERV_NO_REBIND) && norebind)
+	  *norebind = 1;
+	else if (serv->flags & SERV_NO_ADDR)
 	  flags = F_NXDOMAIN;
 	else if (serv->flags & SERV_LITERAL_ADDRESS)
 	  { 
@@ -343,7 +348,7 @@ static int forward_query(int udpfd, union mysockaddr *udpaddr,
       type &= ~SERV_DO_DNSSEC;      
 
       if (daemon->servers && !flags)
-	forward = get_new_frec(now, NULL, 0);
+	forward = get_new_frec(now, NULL, NULL);
       /* table full - flags == 0, return REFUSED */
       
       if (forward)
@@ -671,7 +676,7 @@ static size_t process_reply(struct dns_header *header, time_t now, struct server
   if (!(header->hb4 & HB4_RA) && rcode == NOERROR &&
       server && !(server->flags & SERV_WARNED_RECURSIVE))
     {
-      prettyprint_addr(&server->addr, daemon->namebuff);
+      (void)prettyprint_addr(&server->addr, daemon->namebuff);
       my_syslog(LOG_WARNING, _("nameserver %s refused to do a recursive query"), daemon->namebuff);
       if (!option_bool(OPT_LOG))
 	server->flags |= SERV_WARNED_RECURSIVE;
@@ -955,7 +960,7 @@ void reply_query(int fd, int family, time_t now)
     {
       forward->sentto->edns_pktsz = SAFE_PKTSZ;
       forward->sentto->pktsz_reduced = now;
-      prettyprint_addr(&forward->sentto->addr, daemon->addrbuff);
+      (void)prettyprint_addr(&forward->sentto->addr, daemon->addrbuff);
       my_syslog(LOG_WARNING, _("reducing DNS packet size for nameserver %s to %d"), daemon->addrbuff, SAFE_PKTSZ);
     }
 
@@ -1034,7 +1039,9 @@ void reply_query(int fd, int family, time_t now)
 		  /* Find the original query that started it all.... */
 		  for (orig = forward; orig->dependent; orig = orig->dependent);
 		  
-		  if (--orig->work_counter == 0 || !(new = get_new_frec(now, NULL, 1)))
+		  /* Make sure we don't expire and free the orig frec during the
+		     allocation of a new one. */
+		  if (--orig->work_counter == 0 || !(new = get_new_frec(now, NULL, orig)))
 		    status = STAT_ABANDONED;
 		  else
 		    {
@@ -1277,8 +1284,9 @@ void receive_query(struct listener *listen, time_t now)
 		 CMSG_SPACE(sizeof(struct sockaddr_dl))];
 #endif
   } control_u;
+  int family = listen->addr.sa.sa_family;
    /* Can always get recvd interface for IPv6 */
-  int check_dst = !option_bool(OPT_NOWILD) || listen->family == AF_INET6;
+  int check_dst = !option_bool(OPT_NOWILD) || family == AF_INET6;
 
   /* packet buffer overwritten */
   daemon->srv_save = NULL;
@@ -1290,7 +1298,7 @@ void receive_query(struct listener *listen, time_t now)
     {
       auth_dns = listen->iface->dns_auth;
      
-      if (listen->family == AF_INET)
+      if (family == AF_INET)
 	{
 	  dst_addr_4 = dst_addr.addr4 = listen->iface->addr.in.sin_addr;
 	  netmask = listen->iface->netmask;
@@ -1320,9 +1328,9 @@ void receive_query(struct listener *listen, time_t now)
      information disclosure. */
   memset(daemon->packet + n, 0, daemon->edns_pktsz - n);
   
-  source_addr.sa.sa_family = listen->family;
+  source_addr.sa.sa_family = family;
   
-  if (listen->family == AF_INET)
+  if (family == AF_INET)
     {
        /* Source-port == 0 is an error, we can't send back to that. 
 	  http://www.ietf.org/mail-archive/web/dnsop/current/msg11441.html */
@@ -1342,7 +1350,7 @@ void receive_query(struct listener *listen, time_t now)
     {
       struct addrlist *addr;
 
-      if (listen->family == AF_INET6) 
+      if (family == AF_INET6) 
 	{
 	  for (addr = daemon->interface_addrs; addr; addr = addr->next)
 	    if ((addr->flags & ADDRLIST_IPV6) &&
@@ -1380,7 +1388,7 @@ void receive_query(struct listener *listen, time_t now)
 	return;
 
 #if defined(HAVE_LINUX_NETWORK)
-      if (listen->family == AF_INET)
+      if (family == AF_INET)
 	for (cmptr = CMSG_FIRSTHDR(&msg); cmptr; cmptr = CMSG_NXTHDR(&msg, cmptr))
 	  if (cmptr->cmsg_level == IPPROTO_IP && cmptr->cmsg_type == IP_PKTINFO)
 	    {
@@ -1393,7 +1401,7 @@ void receive_query(struct listener *listen, time_t now)
 	      if_index = p.p->ipi_ifindex;
 	    }
 #elif defined(IP_RECVDSTADDR) && defined(IP_RECVIF)
-      if (listen->family == AF_INET)
+      if (family == AF_INET)
 	{
 	  for (cmptr = CMSG_FIRSTHDR(&msg); cmptr; cmptr = CMSG_NXTHDR(&msg, cmptr))
 	    {
@@ -1418,7 +1426,7 @@ void receive_query(struct listener *listen, time_t now)
 	}
 #endif
       
-      if (listen->family == AF_INET6)
+      if (family == AF_INET6)
 	{
 	  for (cmptr = CMSG_FIRSTHDR(&msg); cmptr; cmptr = CMSG_NXTHDR(&msg, cmptr))
 	    if (cmptr->cmsg_level == IPPROTO_IPV6 && cmptr->cmsg_type == daemon->v6pktinfo)
@@ -1439,16 +1447,16 @@ void receive_query(struct listener *listen, time_t now)
       if (!indextoname(listen->fd, if_index, ifr.ifr_name))
 	return;
       
-      if (!iface_check(listen->family, &dst_addr, ifr.ifr_name, &auth_dns))
+      if (!iface_check(family, &dst_addr, ifr.ifr_name, &auth_dns))
 	{
 	   if (!option_bool(OPT_CLEVERBIND))
 	     enumerate_interfaces(0); 
-	   if (!loopback_exception(listen->fd, listen->family, &dst_addr, ifr.ifr_name) &&
-	       !label_exception(if_index, listen->family, &dst_addr))
+	   if (!loopback_exception(listen->fd, family, &dst_addr, ifr.ifr_name) &&
+	       !label_exception(if_index, family, &dst_addr))
 	     return;
 	}
 
-      if (listen->family == AF_INET && option_bool(OPT_LOCALISE))
+      if (family == AF_INET && option_bool(OPT_LOCALISE))
 	{
 	  struct irec *iface;
 	  
@@ -1493,7 +1501,7 @@ void receive_query(struct listener *listen, time_t now)
 #endif
       char *types = querystr(auth_dns ? "auth" : "query", type);
       
-      if (listen->family == AF_INET) 
+      if (family == AF_INET) 
 	log_query(F_QUERY | F_IPV4 | F_FORWARD, daemon->namebuff, 
 		  (union all_addr *)&source_addr.in.sin_addr, types);
       else
@@ -2246,9 +2254,10 @@ static void free_frec(struct frec *f)
    else return *wait zero if one available, or *wait is delay to
    when the oldest in-use record will expire. Impose an absolute
    limit of 4*TIMEOUT before we wipe things (for random sockets).
-   If force is set, always return a result, even if we have
-   to allocate above the limit. */
-struct frec *get_new_frec(time_t now, int *wait, int force)
+   If force is non-NULL, always return a result, even if we have
+   to allocate above the limit, and never free the record pointed
+   to by the force argument. */
+struct frec *get_new_frec(time_t now, int *wait, struct frec *force)
 {
   struct frec *f, *oldest, *target;
   int count;
@@ -2265,7 +2274,7 @@ struct frec *get_new_frec(time_t now, int *wait, int force)
 	    /* Don't free DNSSEC sub-queries here, as we may end up with
 	       dangling references to them. They'll go when their "real" query 
 	       is freed. */
-	    if (!f->dependent)
+	    if (!f->dependent && f != force)
 #endif
 	      {
 		if (difftime(now, f->time) >= 4*TIMEOUT)

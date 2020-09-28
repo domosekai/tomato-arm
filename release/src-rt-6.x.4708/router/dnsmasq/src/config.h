@@ -1,4 +1,4 @@
-/* dnsmasq is Copyright (c) 2000-2018 Simon Kelley
+/* dnsmasq is Copyright (c) 2000-2020 Simon Kelley
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -40,9 +40,11 @@
 #define DHCP_PACKET_MAX 16384 /* hard limit on DHCP packet size */
 #define SMALLDNAME 50 /* most domain names are smaller than this */
 #define CNAME_CHAIN 10 /* chains longer than this atr dropped for loop protection */
+#define DNSSEC_MIN_TTL 60 /* DNSKEY and DS records in cache last at least this long */
 #define HOSTSFILE "/etc/hosts"
 #define ETHERSFILE "/etc/ethers"
-#define DEFLEASE 3600 /* default lease time, 1 hour */
+#define DEFLEASE 3600 /* default DHCPv4 lease time, one hour */
+#define DEFLEASE6 (3600*24) /* default lease time for DHCPv6. One day. */
 #define CHUSER "nobody"
 #define CHGRP "dip"
 #define TFTP_MAX_CONNECTIONS 50 /* max simultaneous connections */
@@ -50,6 +52,7 @@
 #define RANDFILE "/dev/urandom"
 #define DNSMASQ_SERVICE "uk.org.thekelleys.dnsmasq" /* Default - may be overridden by config */
 #define DNSMASQ_PATH "/uk/org/thekelleys/dnsmasq"
+#define DNSMASQ_UBUS_NAME "dnsmasq" /* Default - may be overridden by config */
 #define AUTH_TTL 600 /* default TTL for auth DNS */
 #define SOA_REFRESH 1200 /* SOA refresh default */
 #define SOA_RETRY 180 /* SOA retry default */
