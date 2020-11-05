@@ -2040,9 +2040,21 @@ static void filter6_input(void)
 #endif	// TCONFIG_FTP
 
 	ip6t_write(
-		"-A INPUT -i %s -j ACCEPT\n" // anything coming from LAN
-		"-A INPUT -i lo -j ACCEPT\n",
+		"-A INPUT -i lo -j ACCEPT\n"
+		"-A INPUT -i %s -j ACCEPT\n", // anything coming from LAN
 			lanface );
+	if (strcmp(lan1face,"")!=0)
+		ip6t_write(
+			"-A INPUT -i %s -j ACCEPT\n",
+				lan1face);
+	if (strcmp(lan2face,"")!=0)
+		ip6t_write(
+			"-A INPUT -i %s -j ACCEPT\n",
+				lan2face);
+	if (strcmp(lan3face,"")!=0)
+		ip6t_write(
+			"-A INPUT -i %s -j ACCEPT\n",
+				lan3face);
 
 	switch (get_ipv6_service()) {
 	case IPV6_ANYCAST_6TO4:
